@@ -1,0 +1,8 @@
+<RCC>
+    <qresource prefix="/">
+        <file>schema.sql</file>
+    </qresource>
+    <qresource prefix="/translations">
+        <file>rappro_fr.qm</file>
+    </qresource>
+</RCC>

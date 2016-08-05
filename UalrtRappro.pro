@@ -16,13 +16,16 @@ TRANSLATIONS = rappro_fr.ts
 SOURCES += main.cpp\
         mainwindow.cpp \
     ofxparser.cpp \
-    statementtablemodel.cpp
+    statementtablemodel.cpp \
+    logindialog.cpp
 
 HEADERS  += mainwindow.h \
     ofxparser.h \
-    statementtablemodel.h
+    statementtablemodel.h \
+    logindialog.h
 
-FORMS    += mainwindow.ui
+FORMS    += mainwindow.ui \
+    logindialog.ui
 
 RESOURCES += \
     resources.qrc

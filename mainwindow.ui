@@ -37,6 +37,9 @@
       <property name="editTriggers">
        <set>QAbstractItemView::NoEditTriggers</set>
       </property>
+      <property name="alternatingRowColors">
+       <bool>true</bool>
+      </property>
       <property name="selectionMode">
        <enum>QAbstractItemView::ContiguousSelection</enum>
       </property>
@@ -64,6 +67,7 @@
     <bool>false</bool>
    </attribute>
    <addaction name="actionImport_file"/>
+   <addaction name="actionAutomatic_match"/>
    <addaction name="actionMatch"/>
    <addaction name="actionQuit"/>
   </widget>
@@ -90,6 +94,14 @@
    </property>
    <property name="text">
     <string>Manual match</string>
+   </property>
+  </action>
+  <action name="actionAutomatic_match">
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
+   <property name="text">
+    <string>Automatic match</string>
    </property>
    <property name="shortcut">
     <string>Ctrl+M</string>

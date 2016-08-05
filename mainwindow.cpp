@@ -1,6 +1,8 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 #include "ofxparser.h"
+#include "automatchresultdialog.h"
+#include "bankaccountinglog.h"
 
 #include <QFileDialog>
 #include <QDebug>
@@ -25,7 +27,6 @@ QString MoneyInCentsItemDelegate::displayText(const QVariant &value, const QLoca
     return locale.toCurrencyString(value.toLongLong() / 100., "€", 2);
 }
 
-
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::MainWindow)
@@ -40,10 +41,7 @@ MainWindow::MainWindow(QWidget *parent) :
         // No database yet...
         QDir settingsFolder = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
         if (!settingsFolder.exists()) {
-            QString baseName = settingsFolder.dirName();
-            settingsFolder.cdUp();
-            settingsFolder.mkdir(baseName);
-            settingsFolder.cd(baseName);
+            settingsFolder.mkpath(".");
         }
         sqlitePath = settingsFolder.absoluteFilePath("statement.sqlite");
 
@@ -89,6 +87,7 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->statementTable->setColumnHidden(5, true);
     ui->statementTable->setColumnHidden(6, true);
     ui->statementTable->setColumnHidden(8, true);
+    ui->statementTable->setColumnHidden(9, true);
     ui->statementTable->setItemDelegateForColumn(3, new MoneyInCentsItemDelegate(this));
     refreshData();
 }
@@ -137,13 +136,16 @@ void MainWindow::on_actionImport_file_triggered()
             int accountId = -1;
             if (!accountQuery.next()) {
                 qDebug() << "Unknown iban " << acct.iban;
-                //QInput
-                QString bankAccountName = QInputDialog::getText(this, tr("Bank account name"), tr("New bank account found.\nPlease give a name for the account with IBAN %1").arg(acct.iban));
-                if (bankAccountName.isEmpty())
+
+                BankAccountingLog bankLogDialog(this);
+                bankLogDialog.setIban(acct.iban);
+                if (!bankLogDialog.exec())
                     return;
-                accountQuery.prepare("INSERT INTO bank_account (currency, iban, name) VALUES ('EUR', :iban, :name);");
+
+                accountQuery.prepare("INSERT INTO bank_account (currency, iban, name, accounting_id) VALUES ('EUR', :iban, :name, :accounting);");
                 accountQuery.bindValue(":iban", acct.iban);
-                accountQuery.bindValue(":name", bankAccountName);
+                accountQuery.bindValue(":name", bankLogDialog.accountName());
+                accountQuery.bindValue(":accounting", bankLogDialog.accountId());
                 if (!accountQuery.exec()) {
                     QMessageBox::warning(this, tr("Failed to insert account"), tr("Database error : %1").arg(accountQuery.lastError().databaseText()));
                     return;
@@ -207,6 +209,7 @@ void MainWindow::refreshData()
         ui->bankAccountList->addItem(QString("%1 (%2)").arg(accountList.value(1).toString()).arg(accountList.value(2).toString()), accountList.value(0));
     }
     ui->actionMatch->setEnabled(false);
+    ui->actionAutomatic_match->setEnabled(false);
 }
 
 void MainWindow::on_bankAccountList_currentIndexChanged(int index)
@@ -216,11 +219,13 @@ void MainWindow::on_bankAccountList_currentIndexChanged(int index)
     statementTableModel->select();
     ui->statementTable->resizeColumnsToContents();
     ui->actionMatch->setEnabled(false);
+    ui->actionAutomatic_match->setEnabled(false);
 }
 
 void MainWindow::refreshFromSelection()
 {
     ui->actionMatch->setEnabled(ui->statementTable->selectionModel()->selectedIndexes().size() > 0);
+    ui->actionAutomatic_match->setEnabled(ui->statementTable->selectionModel()->selectedIndexes().size() > 0);
 }
 
 void MainWindow::on_actionMatch_triggered()
@@ -233,6 +238,86 @@ void MainWindow::on_actionMatch_triggered()
     }
     for (QModelIndex &idx : selectedRows) {
         qDebug() << statementTableModel->setData(idx.sibling(idx.row(), 8), true);
+    }
+    statementTableModel->submitAll();
+}
+
+void MainWindow::on_actionAutomatic_match_triggered()
+{
+    qDebug() << "Mark as matched, go go go !";
+    QModelIndexList selectedRows = ui->statementTable->selectionModel()->selectedRows();
+    if (selectedRows.size() == 0) {
+        QMessageBox::warning(this, tr("Missing selection"), tr("Please select statement lines to match first."));
+        return;
+    }
+
+    // Fetch the accounting id for the selected bank account
+    //statementTableModel->setFilter(QString("account=%1").arg(ui->bankAccountList->itemData(index).toLongLong()));
+    int selectedBankAccount = ui->bankAccountList->itemData(ui->bankAccountList->currentIndex()).toLongLong();
+    QSqlQuery bankAccountInfo(QSqlDatabase::database("statement"));
+    bankAccountInfo.prepare("SELECT accounting_id FROM bank_account WHERE id = ? AND accounting_id IS NOT NULL AND accounting_id <> ''; ");
+    bankAccountInfo.bindValue(0, selectedBankAccount);
+    if (!bankAccountInfo.exec() || !bankAccountInfo.next()) {
+        QMessageBox::warning(this, tr("Invalid bank account"), tr("No automatic match possible with this bank account, it has no corresponding accounting log."));
+        return;
+    }
+    QString accountingId = bankAccountInfo.value(0).toString();
+    qDebug() << accountingId;
+    if (true)
+        return;
+
+    QSqlQuery aerogestSearchDebit(QSqlDatabase::database("aerogest"));
+    aerogestSearchDebit.prepare("SELECT Id_enr, Libelle, Debit, Credit, MA_date, commentaire FROM Compta_EcrituresDetail WHERE Numcompte = ? AND Debit = ? AND NOT(pointageVerouille);");
+    QSqlQuery aerogestSearchCredit(QSqlDatabase::database("aerogest"));
+    aerogestSearchCredit.prepare("SELECT Id_enr, Libelle, Debit, Credit, MA_date, commentaire FROM Compta_EcrituresDetail WHERE Numcompte = ? AND Credit = ? AND NOT(pointageVerouille);");
+    QSqlQuery aerogestMarkMatch(QSqlDatabase::database("aerogest"));
+    aerogestMarkMatch.prepare("UPDATE Compta_EcrituresDetail SET pointageVerouille=True, Pointage=? WHERE Id_enr = ?;");
+
+    for (QModelIndex &idx : selectedRows) {
+        // If line is already marked as matched, skip it
+        if (statementTableModel->data(idx.sibling(idx.row(), 8)).toBool())
+            continue;
+
+        QDate lineDate = statementTableModel->data(idx.sibling(idx.row(), 2)).toDate();
+        QString lineLabel = statementTableModel->data(idx.sibling(idx.row(), 7)).toString();
+        QString lineType = statementTableModel->data(idx.sibling(idx.row(), 4)).toString();
+        int amountInCents = statementTableModel->data(idx.sibling(idx.row(), 3)).toInt();
+        qDebug() << "Searching for ..." << amountInCents << " euros cts";
+        QSqlQuery &targetQuery = aerogestSearchDebit;
+        if (amountInCents < 0) {
+            targetQuery = aerogestSearchCredit;
+            amountInCents = -amountInCents;
+        }
+        targetQuery.bindValue(0, accountingId);
+        targetQuery.bindValue(1, amountInCents / 100.);
+        if (!targetQuery.exec()) {
+            qDebug() << "Failed to execute query : " << targetQuery.lastError().databaseText();
+            QMessageBox::warning(this, tr("Database error"), tr("Failed to search the Aerogest base : %1").arg(targetQuery.lastError().databaseText()));
+            break;
+        }
+        if (targetQuery.numRowsAffected() == 0) {
+            qDebug() << "No result, continue...";
+            continue;
+        }
+
+        AutoMatchResultDialog dialog(this);
+        dialog.setStatementInformation(lineDate, amountInCents, lineType, lineLabel);
+        dialog.setMatchQuery(targetQuery);
+        if (dialog.exec()) {
+            // Mark the line as matched in our base, and in aerogest...
+
+            qDebug() << dialog.selectedId();
+            aerogestMarkMatch.bindValue(0, lineDate);
+            aerogestMarkMatch.bindValue(1, dialog.selectedId());
+            if (!aerogestMarkMatch.exec()) {
+                QMessageBox::warning(this, tr("Database error"), tr("Failed to update the Aerogest base : %1").arg(aerogestMarkMatch.lastError().databaseText()));
+                break;
+            }
+            qDebug() << statementTableModel->setData(idx.sibling(idx.row(), 8), true);
+            qDebug() << statementTableModel->setData(idx.sibling(idx.row(), 9), dialog.selectedId());
+        } else {
+            // User rejected that automatic match, too bad
+        }
     }
     statementTableModel->submitAll();
 }

@@ -38,6 +38,8 @@ private slots:
 
     void on_actionMatch_triggered();
 
+    void on_actionAutomatic_match_triggered();
+
 private:
     Ui::MainWindow *ui;
     StatementTableModel *statementTableModel;

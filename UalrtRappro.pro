@@ -17,15 +17,21 @@ SOURCES += main.cpp\
         mainwindow.cpp \
     ofxparser.cpp \
     statementtablemodel.cpp \
-    logindialog.cpp
+    logindialog.cpp \
+    automatchresultdialog.cpp \
+    bankaccountinglog.cpp
 
 HEADERS  += mainwindow.h \
     ofxparser.h \
     statementtablemodel.h \
-    logindialog.h
+    logindialog.h \
+    automatchresultdialog.h \
+    bankaccountinglog.h
 
 FORMS    += mainwindow.ui \
-    logindialog.ui
+    logindialog.ui \
+    automatchresultdialog.ui \
+    bankaccountinglog.ui
 
 RESOURCES += \
     resources.qrc
